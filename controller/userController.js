@@ -1,39 +1,26 @@
-import User from "../model/User.js"
+import User from "../model/User.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import sendEmail from "../config/sendEmail.js";
 
 export const secretKey = "apple";
 
-export const getUsers = async (req ,res) => {
-    try{
-        const allUsers =await User.find();
-    res.json(allUsers)
-    }catch(err){
-        console.log("cant fetch",err)
-    }
-}
-
-
+export const getUsers = async (req, res) => {
+  try {
+    const allUsers = await User.find();
+    res.json(allUsers);
+  } catch (err) {
+    console.log("cant fetch", err);
+  }
+};
 
 export const createUser = async (req, res) => {
-  
   try {
-    
+    const { name, email, password, phone, address } = req.body;
 
-    const { name, email, password } = req.body;
-
-    console.log("Name:", name);
-    console.log("Email:", email);
-    console.log("Password exists:", Boolean(password));
-
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !phone || !address) {
       return res.status(400).json({
-        message: "Missing required fields",
-        received: {
-          name: name ?? null,
-          email: email ?? null,
-          passwordExists: Boolean(password),
-        },
+        message: "Please fill in all required fields",
       });
     }
 
@@ -61,7 +48,19 @@ export const createUser = async (req, res) => {
       name: name.trim(),
       email: normalizedEmail,
       password: hashedPassword,
+      phone,
+      address,
     });
+
+    await sendEmail(
+      normalizedEmail,
+      "Welcome to My App",
+      `
+        <h2>Hello ${name}!</h2>
+        <p>Welcome to our application.</p>
+        <p>Your account has been created successfully.</p>
+      `,
+    );
 
     return res.status(201).json({
       message: "Account created successfully!",
@@ -69,6 +68,8 @@ export const createUser = async (req, res) => {
         id: createdUser._id,
         name: createdUser.name,
         email: createdUser.email,
+        phone: createdUser.phone,
+        address: createdUser.address,
       },
     });
   } catch (err) {
@@ -80,9 +81,6 @@ export const createUser = async (req, res) => {
   }
 };
 
-
-
-
 export const login = async (req, res) => {
   // const {email,password} = req.body
   // const user = await User.findOne({email})
@@ -93,8 +91,8 @@ export const login = async (req, res) => {
   const passwordFromBody = req.body.password;
 
   const user = await User.findOne({
-  email: emailFromBody.trim().toLowerCase(),
-}).select("+password");
+    email: emailFromBody.trim().toLowerCase(),
+  }).select("+password");
 
   if (!user) {
     return res.json({
@@ -113,7 +111,7 @@ export const login = async (req, res) => {
       id: user._id,
       email: user.email,
       name: user.name,
-      role:user.role
+      role: user.role,
     },
     secretKey,
     { expiresIn: "1h" },
@@ -126,7 +124,9 @@ export const login = async (req, res) => {
       id: user._id,
       name: user.name,
       email: user.email,
-      role : user.role
+      phone: user.phone,
+      address: user.address,
+      role: user.role,
     },
   });
 };
@@ -144,8 +144,39 @@ export const deleteUser = async (req, res) => {
 };
 
 export const updateUser = async (req, res) => {
-  const allBlogs = await User.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-  });
-  res.json(allBlogs);
+  try {
+    const { name, email, phone, address } = req.body;
+
+    if (req.user.id !== req.params.id) {
+      return res.status(403).json({
+        message: "You can only update your own profile",
+      });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        name,
+        email,
+        phone,
+        address,
+      }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    res.json({
+      message: "Profile updated successfully",
+    });
+
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({
+      message: "Unable to update profile",
+    });
+  }
 };

@@ -92,7 +92,6 @@ export const createOrder = async (req, res) => {
       totalAmount,
       paymentMethod,
       paymentStatus: "PENDING",
-      orderStatus: paymentMethod === "COD" ? "CONFIRMED" : "PENDING",
     });
 
     // For COD, reserve stock and clear the cart.
