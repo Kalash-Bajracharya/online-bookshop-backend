@@ -6,7 +6,7 @@ dotenv.config()
 const sendEmail = async (to, subject, html) => {
   try {
     const info = await transporter.sendMail({
-      from: `"My App" <${process.env.EMAIL_USER}>`,
+      from: `"Pages" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       html,

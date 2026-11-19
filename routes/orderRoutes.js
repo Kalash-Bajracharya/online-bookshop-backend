@@ -9,6 +9,7 @@ import {
   getOrderById,
   updateOrderStatus,
   updatePaymentStatus,
+  cancelOrder,
 } from "../controller/orderController.js";
 
 const router = express.Router();
@@ -16,6 +17,7 @@ const router = express.Router();
 // Customer routes
 router.post("/create", verifyToken, createOrder);
 router.get("/my-orders", verifyToken, getMyOrders);
+router.post("/cancel/:id", verifyToken, cancelOrder);
 
 // Admin routes
 router.get("/getAll", verifyToken, adminOnly, getAllOrders);

@@ -2,6 +2,7 @@ import Cart from "../model/Cart.js";
 import Book from "../model/Book.js";
 import Order from "../model/Order.js";
 import User from "../model/User.js";
+import sendEmail from "../config/sendEmail.js";
 
 // Create an order from the logged-in user's cart
 export const createOrder = async (req, res) => {
@@ -29,10 +30,9 @@ export const createOrder = async (req, res) => {
       name: shippingAddress?.name?.trim() || user.name,
       phone: shippingAddress?.phone?.trim() || user.phone,
       address: shippingAddress?.address?.trim() || user.address,
-      city: shippingAddress?.city?.trim() || user.city,
     };
 
-    if (!address.name || !address.phone || !address.address || !address.city) {
+    if (!address.name || !address.phone || !address.address) {
       return res.status(400).json({
         message: "Please provide all delivery details",
       });
@@ -96,13 +96,8 @@ export const createOrder = async (req, res) => {
 
     // For COD, reserve stock and clear the cart.
     // Online orders will be finalized after payment verification.
+    // Clear cart for COD orders
     if (paymentMethod === "COD") {
-      for (const item of orderItems) {
-        await Book.findByIdAndUpdate(item.book, {
-          $inc: { stock: -item.quantity, sold: item.quantity },
-        });
-      }
-
       await Cart.findOneAndDelete({
         user: req.user.id,
       });
@@ -141,7 +136,6 @@ export const getMyOrders = async (req, res) => {
   }
 };
 
-
 // Admin: Get all orders
 export const getAllOrders = async (req, res) => {
   try {
@@ -159,12 +153,13 @@ export const getAllOrders = async (req, res) => {
   }
 };
 
-
 // Admin: Get one order by ID
 export const getOrderById = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id)
-      .populate("user", "name email phone");
+    const order = await Order.findById(req.params.id).populate(
+      "user",
+      "name email phone",
+    );
 
     if (!order) {
       return res.status(404).json({
@@ -182,18 +177,14 @@ export const getOrderById = async (req, res) => {
   }
 };
 
-
 // Admin: Update order status
+
+
 export const updateOrderStatus = async (req, res) => {
   try {
     const { orderStatus } = req.body;
 
-    const allowedStatuses = [
-      "PENDING",
-      "CONFIRMED",
-      "SHIPPED",
-      "DELIVERED",
-    ];
+    const allowedStatuses = ["PENDING", "CONFIRMED", "SHIPPED", "DELIVERED"];
 
     if (!allowedStatuses.includes(orderStatus)) {
       return res.status(400).json({
@@ -201,7 +192,10 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).populate(
+      "user",
+      "name email",
+    );
 
     if (!order) {
       return res.status(404).json({
@@ -209,14 +203,75 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    order.orderStatus = orderStatus;
+    // Only decrease stock when PENDING changes to CONFIRMED
+    const shouldConfirm =
+      order.orderStatus === "PENDING" &&
+      orderStatus === "CONFIRMED";
 
+    if (shouldConfirm) {
+      // First check stock availability for all books
+      for (const item of order.items) {
+        const book = await Book.findById(item.book);
+
+        if (!book || book.stock < item.quantity) {
+          return res.status(400).json({
+            message: `${item.title} does not have enough stock`,
+          });
+        }
+      }
+
+      // Decrease stock after checking all books
+      for (const item of order.items) {
+        await Book.findByIdAndUpdate(item.book, {
+          $inc: {
+            stock: -item.quantity,
+            sold: item.quantity,
+          },
+        });
+      }
+    }
+
+    order.orderStatus = orderStatus;
     await order.save();
+
+    // Send confirmation email
+    if (shouldConfirm) {
+      try {
+        const customer = order.user;
+
+        const itemsList = order.items.map((item) => `
+          <li>
+            ${item.title} - Quantity: ${item.quantity}
+            - Rs. ${item.price}
+          </li>
+        `).join("");
+
+        await sendEmail(
+          customer.email,
+          "Your Order Has Been Confirmed!",
+          `
+            <h2>Hello ${customer.name}!</h2>
+            <p>Your order has been confirmed successfully.</p>
+
+            <h3>Order Details</h3>
+            <ul>${itemsList}</ul>
+
+            <p><strong>Total Amount:</strong> Rs. ${order.totalAmount}</p>
+            <p><strong>Payment Method:</strong> ${order.paymentMethod}</p>
+
+            <p>Thank you for shopping with us!</p>
+          `,
+        );
+      } catch (emailError) {
+        console.error("Confirmation email failed:", emailError);
+      }
+    }
 
     return res.status(200).json({
       message: "Order status updated successfully",
       order,
     });
+
   } catch (error) {
     console.error("Update order status error:", error);
 
@@ -265,3 +320,36 @@ export const updatePaymentStatus = async (req, res) => {
   }
 };
 
+// Cancel pending order
+export const cancelOrder = async (req, res) => {
+  try {
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        user: req.user.id,
+        orderStatus: "PENDING",
+      },
+      {
+        $set: { orderStatus: "CANCELLED" },
+      },
+      { returnDocument: "after" },
+    );
+
+    if (!order) {
+      return res.status(400).json({
+        message: "Order cannot be cancelled",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Order cancelled successfully",
+      order,
+    });
+  } catch (error) {
+    console.log("Cancel order error:", error);
+
+    return res.status(500).json({
+      message: "Failed to cancel order",
+    });
+  }
+};
