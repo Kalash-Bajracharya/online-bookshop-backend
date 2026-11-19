@@ -231,41 +231,66 @@ export const updateOrderStatus = async (req, res) => {
       }
     }
 
-    order.orderStatus = orderStatus;
-    await order.save();
+    const previousStatus = order.orderStatus;
 
-    // Send confirmation email
-    if (shouldConfirm) {
-      try {
-        const customer = order.user;
+order.orderStatus = orderStatus;
+await order.save();
 
-        const itemsList = order.items.map((item) => `
-          <li>
-            ${item.title} - Quantity: ${item.quantity}
-            - Rs. ${item.price}
-          </li>
-        `).join("");
+    
+// Send email when order is confirmed or delivered
+if (
+  (previousStatus === "PENDING" && orderStatus === "CONFIRMED") ||
+  (previousStatus === "SHIPPED" && orderStatus === "DELIVERED")
+) {
+  try {
+    const customer = order.user;
 
-        await sendEmail(
-          customer.email,
-          "Your Order Has Been Confirmed!",
-          `
-            <h2>Hello ${customer.name}!</h2>
-            <p>Your order has been confirmed successfully.</p>
+    const itemsList = order.items.map((item) => `
+      <li>
+        ${item.title} - Quantity: ${item.quantity}
+        - Rs. ${item.price}
+      </li>
+    `).join("");
 
-            <h3>Order Details</h3>
-            <ul>${itemsList}</ul>
+    let subject;
+    let message;
 
-            <p><strong>Total Amount:</strong> Rs. ${order.totalAmount}</p>
-            <p><strong>Payment Method:</strong> ${order.paymentMethod}</p>
-
-            <p>Thank you for shopping with us!</p>
-          `,
-        );
-      } catch (emailError) {
-        console.error("Confirmation email failed:", emailError);
-      }
+    if (orderStatus === "CONFIRMED") {
+      subject = "Your Order Has Been Confirmed!";
+      message = `
+        <h2>Hello ${customer.name}!</h2>
+        <p>Your order has been confirmed successfully.</p>
+        <p>We are preparing your books for delivery.</p>
+      `;
+    } else {
+      subject = "Your Order Has Been Delivered!";
+      message = `
+        <h2>Hello ${customer.name}!</h2>
+        <p>Your order has been successfully delivered.</p>
+        <p>We hope you enjoy your new books!</p>
+        <p>Thank you for shopping with Pages.</p>
+      `;
     }
+
+    await sendEmail(
+      customer.email,
+      subject,
+      `
+        ${message}
+
+        <h3>Order Details</h3>
+        <ul>${itemsList}</ul>
+
+        <p><strong>Total Amount:</strong> Rs. ${order.totalAmount}</p>
+        <p><strong>Payment Method:</strong> ${order.paymentMethod}</p>
+      `
+    );
+
+  } catch (emailError) {
+    console.error("Order email failed:", emailError);
+  }
+}
+
 
     return res.status(200).json({
       message: "Order status updated successfully",
